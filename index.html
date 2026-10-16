@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Traffic Junction Simulator AI | Indian 4-Way Junction</title>
+  <meta name="description" content="Professional Indian 4-way traffic junction simulator with AI adaptive signal control, collision prevention, live statistics, and Firebase integration.">
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome Icons for crisp UI icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <!-- Chart.js CDN for performance comparison charts -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <!-- Firebase Web SDK (v10 modular / compat via CDN) -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="theme-night">
+  <div class="app-container">
+    <!-- Top Navigation Header -->
+    <header class="app-header">
+      <div class="brand-section">
+        <div class="logo-box">
+          <i class="fa-solid fa-traffic-light logo-icon"></i>
+          <span class="logo-pulse"></span>
+        </div>
+        <div class="brand-text">
+          <h1>Smart Traffic Junction <span class="ai-badge">AI Simulator</span></h1>
+          <p class="subtitle"><i class="fa-solid fa-location-dot"></i> Indian 4-Way Smart Junction • Left-Hand Drive System</p>
+        </div>
+      </div>
+
+      <div class="header-status-group">
+        <!-- Simulation State Badge -->
+        <div class="status-pill" id="simStatusPill">
+          <span class="status-dot paused"></span>
+          <span class="status-label" id="simStatusText">READY</span>
+        </div>
+
+        <!-- Mode Badge -->
+        <div class="mode-pill" id="currentModeBadge">
+          <i class="fa-solid fa-clock"></i>
+          <span id="currentModeText">FIXED-TIME MODE</span>
+        </div>
+
+        <!-- Firebase Cloud Status Badge -->
+        <button class="firebase-pill" id="firebaseStatusPill" title="Click to view Firebase Cloud status & settings">
+          <i class="fa-solid fa-cloud"></i>
+          <span id="firebaseStatusText">Firebase: Local Mode</span>
+          <i class="fa-solid fa-gear gear-hint"></i>
+        </button>
+
+        <!-- Quick Toggles -->
+        <div class="quick-toggles">
+          <button class="icon-toggle-btn" id="nightModeToggle" title="Toggle Day / Night Visual Mode">
+            <i class="fa-solid fa-moon"></i>
+          </button>
+          <button class="icon-toggle-btn" id="soundToggle" title="Toggle Sound FX (Web Audio)">
+            <i class="fa-solid fa-volume-high"></i>
+          </button>
+          <button class="icon-toggle-btn" id="helpModalBtn" title="Help & Simulator Guide">
+            <i class="fa-solid fa-circle-question"></i>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Workspace Layout -->
+    <main class="main-layout">
+      <!-- Left Column: Controls & Configuration -->
+      <aside class="sidebar-panel left-panel">
+        <!-- Master Control Box -->
+        <section class="dashboard-card primary-controls-card">
+          <div class="card-header">
+            <h3><i class="fa-solid fa-gamepad"></i> Master Controls</h3>
+            <span class="badge time-display" id="simTimeDisplay">00:00.0</span>
+          </div>
+          <div class="card-body">
+            <!-- Playback Buttons -->
+            <div class="control-btn-grid">
+              <button id="btnStart" class="btn btn-primary">
+                <i class="fa-solid fa-play"></i> Start
+              </button>
+              <button id="btnPause" class="btn btn-warning" disabled>
+                <i class="fa-solid fa-pause"></i> Pause
+              </button>
+              <button id="btnResume" class="btn btn-success" style="display: none;">
+                <i class="fa-solid fa-play"></i> Resume
+              </button>
+              <button id="btnReset" class="btn btn-danger">
+                <i class="fa-solid fa-rotate-left"></i> Reset
+              </button>
+            </div>
+
+            <!-- Simulation Speed Controls -->
+            <div class="control-row">
+              <label for="speedSelect"><i class="fa-solid fa-gauge-high"></i> Sim Speed:</label>
+              <div class="speed-btn-group" id="speedBtnGroup">
+                <button class="speed-btn" data-speed="0.5">0.5x</button>
+                <button class="speed-btn active" data-speed="1.0">1.0x</button>
+                <button class="speed-btn" data-speed="2.0">2.0x</button>
+                <button class="speed-btn" data-speed="4.0">4.0x</button>
+              </div>
+            </div>
+
+            <!-- Traffic Density / Spawn Rate Slider -->
+            <div class="control-row slider-row">
+              <div class="slider-header">
+                <label for="spawnRateSlider"><i class="fa-solid fa-car-tunnel"></i> Traffic Spawn Rate:</label>
+                <span class="slider-value" id="spawnRateValue">35 veh/min</span>
+              </div>
+              <input type="range" id="spawnRateSlider" min="10" max="80" step="5" value="35">
+              <div class="slider-ticks">
+                <span>Light (10)</span>
+                <span>Normal (35)</span>
+                <span>Heavy (60)</span>
+                <span>Rush (80)</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Signal Mode Selection -->
+        <section class="dashboard-card mode-select-card">
+          <div class="card-header">
+            <h3><i class="fa-solid fa-brain"></i> Signal Intelligence</h3>
+          </div>
+          <div class="card-body">
+            <div class="mode-switch-container">
+              <button class="mode-switch-btn active" id="btnModeFixed">
+                <div class="mode-icon"><i class="fa-solid fa-stopwatch"></i></div>
+                <div class="mode-info">
+                  <strong>Fixed-Time Mode</strong>
+                  <small>Static 20s/4s intervals</small>
+                </div>
+              </button>
+              <button class="mode-switch-btn" id="btnModeAdaptive">
+                <div class="mode-icon ai-glow"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
+                <div class="mode-info">
+                  <strong>Adaptive AI Mode</strong>
+                  <small>Dynamic queue-weighted timing</small>
+                </div>
+              </button>
+            </div>
+
+            <!-- Adaptive AI Reasoner HUD -->
+            <div class="ai-reasoner-box" id="aiReasonerBox">
+              <div class="reasoner-title">
+                <i class="fa-solid fa-microchip"></i> AI Decision Engine
+                <span class="live-dot"></span>
+              </div>
+              <p class="reasoner-text" id="aiDecisionText">Monitoring intersection density. Adaptive weights active.</p>
+              <div class="ai-metrics-mini">
+                <span>N-S Demand: <strong id="nsDemandVal">0</strong></span>
+                <span>E-W Demand: <strong id="ewDemandVal">0</strong></span>
+              </div>
+            </div>
+
+            <!-- Advanced Toggles: Free Left Turn & Strict Indian Rules -->
+            <div class="toggles-group">
+              <label class="toggle-control" title="Allows vehicles in left-most lane to turn left continuously if no pedestrian/merging conflict exists">
+                <input type="checkbox" id="chkFreeLeftTurn" checked>
+                <span class="toggle-slider"></span>
+                <span class="toggle-text"><i class="fa-solid fa-arrow-turn-down fa-rotate-90"></i> Free Left Turn (Indian Rule)</span>
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <!-- Emergency Vehicle & Green Corridor -->
+        <section class="dashboard-card emergency-card">
+          <div class="card-header">
+            <h3><i class="fa-solid fa-truck-medical"></i> Emergency Priority</h3>
+            <span class="badge badge-emergency" id="corridorBadge">STANDBY</span>
+          </div>
+          <div class="card-body">
+            <p class="card-desc">Request immediate Green Corridor priority for an emergency ambulance with automated safe clearance.</p>
+            <div class="emergency-spawn-row">
+              <select id="emergencyDirectionSelect" class="form-select">
+                <option value="NORTH">Approach from NORTH</option>
+                <option value="SOUTH">Approach from SOUTH</option>
+                <option value="EAST">Approach from EAST</option>
+                <option value="WEST">Approach from WEST</option>
+              </select>
+              <button id="btnSpawnEmergency" class="btn btn-emergency">
+                <i class="fa-solid fa-siren-on fa-beat"></i> Dispatch Ambulance
+              </button>
+            </div>
+            <div class="clearance-status" id="clearanceStatus">
+              <i class="fa-solid fa-shield-halved"></i> Safety clearance protocol ready
+            </div>
+          </div>
+        </section>
+
+        <!-- Cloud Session & Firebase Storage -->
+        <section class="dashboard-card cloud-card">
+          <div class="card-header">
+            <h3><i class="fa-solid fa-cloud-arrow-up"></i> Cloud Analytics</h3>
+            <button class="btn-text" id="btnOpenFirebaseModal"><i class="fa-solid fa-sliders"></i> Config</button>
+          </div>
+          <div class="card-body">
+            <div class="cloud-actions">
+              <button id="btnSaveSession" class="btn btn-outline" title="Save current simulation session metrics to Cloud">
+                <i class="fa-solid fa-floppy-disk"></i> Save Run
+              </button>
+              <button id="btnViewHistory" class="btn btn-outline" title="View past simulation runs & comparison logs">
+                <i class="fa-solid fa-clock-rotate-left"></i> History (<span id="sessionCount">0</span>)
+              </button>
+            </div>
+            <div class="cloud-last-sync" id="lastSyncText">
+              <i class="fa-solid fa-circle-check text-success"></i> Auto-logging enabled
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <!-- Center Column: Simulation Canvas & Road Visualization -->
+      <section class="center-panel">
+        <div class="canvas-container-card">
+          <!-- Canvas Top Bar with Live Signal Phase HUD -->
+          <div class="canvas-hud">
+            <div class="hud-phase-indicator">
+              <span class="hud-label">ACTIVE PHASE:</span>
+              <span class="phase-name" id="hudActivePhase">NORTH - SOUTH</span>
+            </div>
+            
+            <div class="hud-timer-badge" id="hudTimerBadge">
+              <span class="phase-circle green" id="hudSignalLamp"></span>
+              <span class="phase-seconds" id="hudPhaseSeconds">18s</span>
+              <span class="phase-sub" id="hudPhaseSub">GREEN</span>
+            </div>
+
+            <div class="hud-interlock-status" id="hudSafetyStatus">
+              <i class="fa-solid fa-shield-check"></i> Interlock: <strong>SAFE</strong>
+            </div>
+          </div>
+
+          <!-- The HTML5 Simulation Canvas -->
+          <div class="canvas-wrapper" id="canvasWrapper">
+            <canvas id="trafficCanvas" width="900" height="900"></canvas>
+            
+            <!-- Canvas Overlay Notifications -->
+            <div class="canvas-overlay" id="canvasOverlay" style="display: none;">
+              <div class="overlay-message" id="overlayMessage">SIMULATION PAUSED</div>
+            </div>
+          </div>
+
+          <!-- Canvas Footer: Legend & Vehicle Types -->
+          <div class="canvas-footer-legend">
+            <div class="legend-item"><span class="legend-swatch car"></span> Car (Sedan/SUV)</div>
+            <div class="legend-item"><span class="legend-swatch auto"></span> Auto-Rickshaw</div>
+            <div class="legend-item"><span class="legend-swatch bike"></span> Bike / Scooter</div>
+            <div class="legend-item"><span class="legend-swatch bus"></span> Bus / Heavy</div>
+            <div class="legend-item"><span class="legend-swatch ambulance"></span> Ambulance</div>
+            <div class="legend-spacer"></div>
+            <div class="legend-item"><i class="fa-solid fa-circle-info"></i> Left Lane: Free Left Turn</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Column: Live Statistics & Performance Comparison -->
+      <aside class="sidebar-panel right-panel">
+        <!-- Live Counters Card -->
+        <section class="dashboard-card stats-overview-card">
+          <div class="card-header">
+            <h3><i class="fa-solid fa-chart-line"></i> Live Telemetry</h3>
+            <span class="live-pill"><span class="live-dot"></span> LIVE</span>
+          </div>
+          <div class="card-body">
+            <div class="stat-grid-2x2">
+              <div class="stat-box primary">
+                <div class="stat-val" id="statCarsPassed">0</div>
+                <div class="stat-lbl"><i class="fa-solid fa-check-double"></i> Total Passed</div>
+              </div>
+              <div class="stat-box warning">
+                <div class="stat-val" id="statAvgWait">0.0<small>s</small></div>
+                <div class="stat-lbl"><i class="fa-solid fa-hourglass-half"></i> Avg Wait Time</div>
+              </div>
+              <div class="stat-box info">
+                <div class="stat-val" id="statWaitingNow">0</div>
+                <div class="stat-lbl"><i class="fa-solid fa-users-line"></i> Waiting Now</div>
+              </div>
+              <div class="stat-box success">
+                <div class="stat-val" id="statThroughput">0<small>/m</small></div>
+                <div class="stat-lbl"><i class="fa-solid fa-bolt"></i> Throughput</div>
+              </div>
+            </div>
+
+            <!-- Directional Queues Visual Bars -->
+            <div class="queue-breakdown-section">
+              <h4>Approach Queue Lengths</h4>
+              
+              <div class="queue-row">
+                <div class="queue-label"><i class="fa-solid fa-compass"></i> North</div>
+                <div class="queue-bar-track">
+                  <div class="queue-bar-fill fill-north" id="barQueueNorth" style="width: 0%;"></div>
+                </div>
+                <div class="queue-val" id="valQueueNorth">0 veh</div>
+              </div>
+
+              <div class="queue-row">
+                <div class="queue-label"><i class="fa-solid fa-compass fa-rotate-180"></i> South</div>
+                <div class="queue-bar-track">
+                  <div class="queue-bar-fill fill-south" id="barQueueSouth" style="width: 0%;"></div>
+                </div>
+                <div class="queue-val" id="valQueueSouth">0 veh</div>
+              </div>
+
+              <div class="queue-row">
+                <div class="queue-label"><i class="fa-solid fa-compass fa-rotate-90"></i> East</div>
+                <div class="queue-bar-track">
+                  <div class="queue-bar-fill fill-east" id="barQueueEast" style="width: 0%;"></div>
+                </div>
+                <div class="queue-val" id="valQueueEast">0 veh</div>
+              </div>
+
+              <div class="queue-row">
+                <div class="queue-label"><i class="fa-solid fa-compass fa-rotate-270"></i> West</div>
+                <div class="queue-bar-track">
+                  <div class="queue-bar-fill fill-west" id="barQueueWest" style="width: 0%;"></div>
+                </div>
+                <div class="queue-val" id="valQueueWest">0 veh</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Benchmark / Performance Comparison Card -->
+        <section class="dashboard-card comparison-card">
+          <div class="card-header">
+            <h3><i class="fa-solid fa-scale-balanced"></i> Fixed vs Adaptive AI</h3>
+            <button class="btn-text" id="btnResetComparison" title="Clear comparison history"><i class="fa-solid fa-trash-can"></i></button>
+          </div>
+          <div class="card-body">
+            <p class="comparison-intro">Side-by-side benchmarking of deterministic signal efficiency under identical traffic arrival rates.</p>
+            
+            <div class="comparison-table-wrapper">
+              <table class="comparison-table">
+                <thead>
+                  <tr>
+                    <th>Metric</th>
+                    <th>Fixed-Time</th>
+                    <th>Adaptive AI</th>
+                    <th>Gain</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Avg Wait</td>
+                    <td id="compFixedWait">--</td>
+                    <td id="compAdaptWait">--</td>
+                    <td id="compWaitDelta" class="delta-cell">--</td>
+                  </tr>
+                  <tr>
+                    <td>Passed</td>
+                    <td id="compFixedPassed">--</td>
+                    <td id="compAdaptPassed">--</td>
+                    <td id="compPassedDelta" class="delta-cell">--</td>
+                  </tr>
+                  <tr>
+                    <td>Max Queue</td>
+                    <td id="compFixedMaxQ">--</td>
+                    <td id="compAdaptMaxQ">--</td>
+                    <td id="compQueueDelta" class="delta-cell">--</td>
+                  </tr>
+                  <tr>
+                    <td>Throughput</td>
+                    <td id="compFixedFlow">--</td>
+                    <td id="compAdaptFlow">--</td>
+                    <td id="compFlowDelta" class="delta-cell">--</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Chart.js Live Comparison Chart -->
+            <div class="chart-container">
+              <canvas id="comparisonChart"></canvas>
+            </div>
+            
+            <div class="comparison-btn-row">
+              <button id="btnBenchRun" class="btn btn-outline-cyan btn-sm">
+                <i class="fa-solid fa-flask-vial"></i> Benchmark 60s Test Run
+              </button>
+            </div>
+          </div>
+        </section>
+      </aside>
+    </main>
+
+    <!-- Firebase Configuration & Cloud Settings Modal -->
+    <div class="modal-backdrop" id="firebaseModal" style="display: none;">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <h3><i class="fa-solid fa-fire text-amber"></i> Firebase Backend Integration</h3>
+          <button class="modal-close-btn" id="btnCloseFirebaseModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="firebase-info-callout">
+            <p><i class="fa-solid fa-circle-info"></i> <strong>Firebase Realtime Database</strong> is integrated to log all simulation runs, queue telemetry, and performance comparisons to the cloud.</p>
+            <p class="small text-muted">A fully functional Local/Offline fallback database is active now, so the simulator works 100% out-of-the-box even without Firebase credentials.</p>
+          </div>
+
+          <div class="form-group">
+            <label for="fbDatabaseUrl"><strong>Database URL:</strong></label>
+            <input type="text" id="fbDatabaseUrl" class="form-input" placeholder="https://your-project-default-rtdb.firebaseio.com">
+          </div>
+
+          <div class="form-group">
+            <label for="fbApiKey"><strong>API Key (Optional / Public):</strong></label>
+            <input type="text" id="fbApiKey" class="form-input" placeholder="AIzaSy...">
+          </div>
+
+          <div class="form-group">
+            <label for="fbProjectId"><strong>Project ID:</strong></label>
+            <input type="text" id="fbProjectId" class="form-input" placeholder="smart-traffic-junction">
+          </div>
+
+          <div class="modal-status-box" id="firebaseConnectionStatus">
+            <i class="fa-solid fa-database"></i> Status: <span id="fbStatusSpan">Running in Local Mock Mode</span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" id="btnTestFirebase">
+            <i class="fa-solid fa-network-wired"></i> Test Connection
+          </button>
+          <button class="btn btn-primary" id="btnSaveFirebaseConfig">
+            <i class="fa-solid fa-check"></i> Apply Config
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Session History Drawer / Modal -->
+    <div class="modal-backdrop" id="historyModal" style="display: none;">
+      <div class="modal-dialog modal-large">
+        <div class="modal-header">
+          <h3><i class="fa-solid fa-clock-rotate-left"></i> Simulation Run History</h3>
+          <button class="modal-close-btn" id="btnCloseHistoryModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="history-table-container">
+            <table class="history-table">
+              <thead>
+                <tr>
+                  <th>Session ID</th>
+                  <th>Timestamp</th>
+                  <th>Duration</th>
+                  <th>Mode</th>
+                  <th>Cars Passed</th>
+                  <th>Avg Wait</th>
+                  <th>Throughput</th>
+                  <th>Source</th>
+                </tr>
+              </thead>
+              <tbody id="historyTableBody">
+                <tr><td colspan="8" class="text-center">No simulation runs saved yet. Start a run and click "Save Run"!</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" id="btnExportJson">
+            <i class="fa-solid fa-download"></i> Export JSON
+          </button>
+          <button class="btn btn-danger" id="btnClearHistory">
+            <i class="fa-solid fa-trash"></i> Clear History
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Help & Guide Modal -->
+    <div class="modal-backdrop" id="helpModal" style="display: none;">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <h3><i class="fa-solid fa-graduation-cap"></i> Traffic Simulator Guide</h3>
+          <button class="modal-close-btn" id="btnCloseHelpModal">&times;</button>
+        </div>
+        <div class="modal-body help-body">
+          <h4><i class="fa-solid fa-flag-checkered"></i> Indian Road Geometry & Rules</h4>
+          <p>This simulator faithfully adheres to <strong>Left-Hand Drive (LHD)</strong> rules practiced across India:</p>
+          <ul>
+            <li>Vehicles drive strictly on the <strong>left half</strong> of the roadway.</li>
+            <li><strong>Free Left Turn:</strong> In Indian traffic systems, the left-most lane allows a continuous free left turn (subject to yield checks). You can toggle this on or off in the control panel.</li>
+            <li><strong>Indian Vehicle Fleet:</strong> Spawns realistic proportions of Cars, Auto-Rickshaws, Two-Wheelers (motorcycles/scooters), Buses, and Emergency Ambulances.</li>
+          </ul>
+
+          <h4><i class="fa-solid fa-shield-halved"></i> 100% Collision-Free Interlock Guarantee</h4>
+          <p>The simulation employs a <strong>deterministic spatial reservation system</strong>. Vehicles entering the junction claim exclusive priority in their trajectory conflict cells. A 3-second all-red clearance interval guarantees no conflicting phase gets green while any vehicle is clearing the intersection.</p>
+
+          <h4><i class="fa-solid fa-brain"></i> Adaptive AI Mode vs Fixed-Time</h4>
+          <p>In Fixed-Time Mode, green signals alternate on strict 20-second timers regardless of whether roads are empty. In <strong>Adaptive AI Mode</strong>, computer-vision queue sensors detect queue length and waiting delays, dynamically extending green time where needed and cutting empty phases short!</p>
+
+          <h4><i class="fa-solid fa-truck-medical"></i> Emergency Green Corridor</h4>
+          <p>Dispatches an ambulance with flashing emergency strobe lights and audio siren. The system safely completes amber clearance on active phases, opens a dedicated green corridor, and returns to normal operation smoothly once passed.</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-primary" id="btnCloseHelpBtn">Got it!</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Audio synthesizers for sirens & chimes (zero external audio file dependencies) -->
+  <script src="js/sound-effects.js"></script>
+
+  <!-- Firebase Configuration & Sync Module -->
+  <script src="js/firebase-config.js"></script>
+
+  <!-- Modular Simulation Logic -->
+  <script src="js/vehicles.js"></script>
+  <script src="js/traffic-signals.js"></script>
+  <script src="js/adaptive-signals.js"></script>
+  <script src="js/statistics.js"></script>
+  <script src="js/simulation.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
