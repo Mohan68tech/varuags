@@ -20,6 +20,7 @@
   <!-- Firebase Web SDK (v10 modular / compat via CDN) -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 
   <link rel="stylesheet" href="style.css">
 </head>
@@ -139,14 +140,14 @@
                 <div class="mode-icon"><i class="fa-solid fa-stopwatch"></i></div>
                 <div class="mode-info">
                   <strong>Fixed-Time Mode</strong>
-                  <small>Static 20s/4s intervals</small>
+                  <small>Static 14s sequential single-arm</small>
                 </div>
               </button>
               <button class="mode-switch-btn" id="btnModeAdaptive">
                 <div class="mode-icon ai-glow"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
                 <div class="mode-info">
                   <strong>Adaptive AI Mode</strong>
-                  <small>Dynamic queue-weighted timing</small>
+                  <small>Dynamic single-arm queue priority</small>
                 </div>
               </button>
             </div>
@@ -157,10 +158,12 @@
                 <i class="fa-solid fa-microchip"></i> AI Decision Engine
                 <span class="live-dot"></span>
               </div>
-              <p class="reasoner-text" id="aiDecisionText">Monitoring intersection density. Adaptive weights active.</p>
+              <p class="reasoner-text" id="aiDecisionText">Monitoring 4-way single-arm queue pressure.</p>
               <div class="ai-metrics-mini">
-                <span>N-S Demand: <strong id="nsDemandVal">0</strong></span>
-                <span>E-W Demand: <strong id="ewDemandVal">0</strong></span>
+                <span>N: <strong id="nDemandVal">0</strong></span>
+                <span>E: <strong id="eDemandVal">0</strong></span>
+                <span>S: <strong id="sDemandVal">0</strong></span>
+                <span>W: <strong id="wDemandVal">0</strong></span>
               </div>
             </div>
 
@@ -229,12 +232,12 @@
           <div class="canvas-hud">
             <div class="hud-phase-indicator">
               <span class="hud-label">ACTIVE PHASE:</span>
-              <span class="phase-name" id="hudActivePhase">NORTH - SOUTH</span>
+              <span class="phase-name" id="hudActivePhase">NORTH ONLY</span>
             </div>
             
             <div class="hud-timer-badge" id="hudTimerBadge">
               <span class="phase-circle green" id="hudSignalLamp"></span>
-              <span class="phase-seconds" id="hudPhaseSeconds">18s</span>
+              <span class="phase-seconds" id="hudPhaseSeconds">14s</span>
               <span class="phase-sub" id="hudPhaseSub">GREEN</span>
             </div>
 
