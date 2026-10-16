@@ -1,33 +1,39 @@
 /**
- * AdaptiveSignalAI - Smart Dynamic Traffic Signal Controller
- * Uses computer-vision queue metrics, vehicle waiting delays, and arrival sensors
- * to dynamically optimize green phase durations, prevent starvation, and eliminate idle red times.
+ * AdaptiveSignalAI - 4-Way Single-Arm Traffic Controller
+ * Individually evaluates queue demand, waiting times, and starvation for all 4 arms
+ * (NORTH, SOUTH, EAST, WEST), dynamically sizing green times and picking the best next phase.
  */
 
 class AdaptiveSignalAI {
   constructor() {
-    this.minGreen = 7.0;       // Minimum green safety threshold (seconds)
-    this.maxGreen = 32.0;      // Maximum green extension ceiling (seconds)
-    this.baseGreen = 16.0;     // Standard baseline green duration
+    this.minGreen = 6.0;       // Minimum green safety threshold (seconds)
+    this.maxGreen = 24.0;      // Maximum green extension ceiling (seconds)
+    this.baseGreen = 12.0;     // Standard baseline green duration
 
     // Anti-starvation safeguards (seconds)
-    this.starvationLimit = 36.0;
-    this.timeSinceNsGreen = 0;
-    this.timeSinceEwGreen = 0;
+    this.starvationLimit = 38.0;
+    this.timeSinceGreen = {
+      NORTH: 0,
+      EAST: 0,
+      SOUTH: 0,
+      WEST: 0
+    };
 
-    // AI Telemetry State
-    this.lastDecisionText = 'AI Engine initialized. Evaluating queue pressure.';
-    this.nsDemandScore = 0;
-    this.ewDemandScore = 0;
-    this.lastDecisionTime = 0;
+    // Approach Demand Metrics
+    this.demands = {
+      NORTH: 0,
+      EAST: 0,
+      SOUTH: 0,
+      WEST: 0
+    };
+
+    this.lastDecisionText = 'AI Engine: Single-Arm Evaluation active. Monitoring directional queues.';
   }
 
   reset() {
-    this.timeSinceNsGreen = 0;
-    this.timeSinceEwGreen = 0;
-    this.nsDemandScore = 0;
-    this.ewDemandScore = 0;
-    this.lastDecisionText = 'AI Engine reset. Monitoring junction arrival rates.';
+    this.timeSinceGreen = { NORTH: 0, EAST: 0, SOUTH: 0, WEST: 0 };
+    this.demands = { NORTH: 0, EAST: 0, SOUTH: 0, WEST: 0 };
+    this.lastDecisionText = 'AI Engine reset. Evaluating all 4 approaches independently.';
   }
 
   /**
@@ -37,28 +43,27 @@ class AdaptiveSignalAI {
    * @param {number} dt Delta time
    */
   evaluate(queueData, signalController, dt) {
-    // Accumulate starvation timers
-    if (signalController.activePhase === Phase.NORTH_SOUTH) {
-      this.timeSinceEwGreen += dt;
-      this.timeSinceNsGreen = 0;
-    } else if (signalController.activePhase === Phase.EAST_WEST) {
-      this.timeSinceNsGreen += dt;
-      this.timeSinceEwGreen = 0;
-    }
+    const directions = ['NORTH', 'EAST', 'SOUTH', 'WEST'];
+    const activeDir = signalController.activePhase;
 
-    // 1. Calculate approach demand metrics
-    const northMetrics = this.calculateApproachDemand(queueData.NORTH || []);
-    const southMetrics = this.calculateApproachDemand(queueData.SOUTH || []);
-    const eastMetrics  = this.calculateApproachDemand(queueData.EAST || []);
-    const westMetrics  = this.calculateApproachDemand(queueData.WEST || []);
+    // 1. Accumulate starvation timers for inactive directions
+    directions.forEach(dir => {
+      if (dir === activeDir && signalController.phaseState === SignalColor.GREEN) {
+        this.timeSinceGreen[dir] = 0;
+      } else {
+        this.timeSinceGreen[dir] += dt;
+      }
+    });
 
-    const nsCombinedDemand = northMetrics.demand + southMetrics.demand;
-    const ewCombinedDemand = eastMetrics.demand + westMetrics.demand;
+    // 2. Calculate approach demand metrics for each arm
+    const metrics = {};
+    directions.forEach(dir => {
+      const approachData = this.calculateApproachDemand(queueData[dir] || []);
+      metrics[dir] = approachData;
+      this.demands[dir] = Math.round(approachData.demand * 10) / 10;
+    });
 
-    this.nsDemandScore = Math.round(nsCombinedDemand * 10) / 10;
-    this.ewDemandScore = Math.round(ewCombinedDemand * 10) / 10;
-
-    const currentPhase = signalController.activePhase;
+    const activeMetrics = metrics[activeDir] || { count: 0, demand: 0, avgWait: 0 };
     const currentElapsedTime = signalController.phaseElapsedTime;
     const isGreen = (signalController.phaseState === SignalColor.GREEN);
 
@@ -66,53 +71,51 @@ class AdaptiveSignalAI {
     let requestEarlyCutoff = false;
     let reasoning = '';
 
-    // 2. Active Phase Logic
-    if (currentPhase === Phase.NORTH_SOUTH) {
-      // Calculate dynamic green target based on NS queue demand
-      const queueCount = northMetrics.count + southMetrics.count;
-      recommendedGreenDuration = Math.min(this.maxGreen, Math.max(this.minGreen, this.baseGreen + (queueCount * 1.8)));
+    // Calculate dynamic green target for the active direction
+    recommendedGreenDuration = Math.min(
+      this.maxGreen,
+      Math.max(this.minGreen, this.baseGreen + (activeMetrics.count * 1.5))
+    );
 
-      if (isGreen) {
-        // Starvation safeguard for EW
-        if (this.timeSinceEwGreen >= this.starvationLimit && ewCombinedDemand > 0) {
-          requestEarlyCutoff = true;
-          reasoning = `Anti-Starvation Trigger: East-West waiting for ${Math.round(this.timeSinceEwGreen)}s. Switching phase.`;
-        }
-        // Early cutoff if NS queue is cleared and EW has queued vehicles
-        else if (queueCount === 0 && currentElapsedTime >= this.minGreen && ewCombinedDemand > 1.0) {
-          requestEarlyCutoff = true;
-          const savedTime = Math.max(0, Math.round(recommendedGreenDuration - currentElapsedTime));
-          reasoning = `Early Cutoff: North-South queue depleted. Diverting to East-West (Saved ~${savedTime}s idle time).`;
-        }
-        // Heavy traffic extension
-        else if (queueCount > 6 && currentElapsedTime < this.maxGreen) {
-          reasoning = `High Demand Detected: ${queueCount} vehicles queued on N-S. Extending Green to ${Math.round(recommendedGreenDuration)}s.`;
-        } else {
-          reasoning = `Optimizing N-S: ${queueCount} in queue. Target Green: ${Math.round(recommendedGreenDuration)}s.`;
+    // Check if any other direction is starving
+    let starvingDir = null;
+    let maxWaitObserved = 0;
+    directions.forEach(dir => {
+      if (dir !== activeDir && this.timeSinceGreen[dir] >= this.starvationLimit && this.demands[dir] > 0) {
+        if (this.timeSinceGreen[dir] > maxWaitObserved) {
+          maxWaitObserved = this.timeSinceGreen[dir];
+          starvingDir = dir;
         }
       }
-    } else if (currentPhase === Phase.EAST_WEST) {
-      const queueCount = eastMetrics.count + westMetrics.count;
-      recommendedGreenDuration = Math.min(this.maxGreen, Math.max(this.minGreen, this.baseGreen + (queueCount * 1.8)));
+    });
 
-      if (isGreen) {
-        // Starvation safeguard for NS
-        if (this.timeSinceNsGreen >= this.starvationLimit && nsCombinedDemand > 0) {
-          requestEarlyCutoff = true;
-          reasoning = `Anti-Starvation Trigger: North-South waiting for ${Math.round(this.timeSinceNsGreen)}s. Switching phase.`;
+    // Determine the next recommended phase (arm with highest demand or starving)
+    let nextRecommendedPhase = null;
+    if (starvingDir) {
+      nextRecommendedPhase = starvingDir;
+    } else {
+      // Pick the non-active direction with highest demand
+      let highestDemand = -1;
+      directions.forEach(dir => {
+        if (dir !== activeDir && this.demands[dir] > highestDemand) {
+          highestDemand = this.demands[dir];
+          nextRecommendedPhase = dir;
         }
-        // Early cutoff if EW queue is cleared and NS has queued vehicles
-        else if (queueCount === 0 && currentElapsedTime >= this.minGreen && nsCombinedDemand > 1.0) {
-          requestEarlyCutoff = true;
-          const savedTime = Math.max(0, Math.round(recommendedGreenDuration - currentElapsedTime));
-          reasoning = `Early Cutoff: East-West queue depleted. Diverting to North-South (Saved ~${savedTime}s idle time).`;
-        }
-        // Heavy traffic extension
-        else if (queueCount > 6 && currentElapsedTime < this.maxGreen) {
-          reasoning = `High Demand Detected: ${queueCount} vehicles queued on E-W. Extending Green to ${Math.round(recommendedGreenDuration)}s.`;
-        } else {
-          reasoning = `Optimizing E-W: ${queueCount} in queue. Target Green: ${Math.round(recommendedGreenDuration)}s.`;
-        }
+      });
+    }
+
+    if (isGreen) {
+      if (starvingDir && currentElapsedTime >= this.minGreen) {
+        requestEarlyCutoff = true;
+        reasoning = `Anti-Starvation Trigger: ${starvingDir} has waited ${Math.round(maxWaitObserved)}s. Transitioning green to ${starvingDir}.`;
+      } else if (activeMetrics.count === 0 && currentElapsedTime >= this.minGreen && nextRecommendedPhase && this.demands[nextRecommendedPhase] > 0) {
+        requestEarlyCutoff = true;
+        const savedTime = Math.max(0, Math.round(recommendedGreenDuration - currentElapsedTime));
+        reasoning = `Early Cutoff: ${activeDir} queue empty. Diverting green to ${nextRecommendedPhase} (Saved ~${savedTime}s idle time).`;
+      } else if (activeMetrics.count > 4 && currentElapsedTime < this.maxGreen) {
+        reasoning = `High Traffic on ${activeDir}: ${activeMetrics.count} vehicles in queue. Extending Green to ${Math.round(recommendedGreenDuration)}s.`;
+      } else {
+        reasoning = `Optimizing ${activeDir} approach: ${activeMetrics.count} queued. Target Green: ${Math.round(recommendedGreenDuration)}s.`;
       }
     }
 
@@ -125,15 +128,16 @@ class AdaptiveSignalAI {
       requestEarlyCutoff,
       minGreen: this.minGreen,
       maxGreen: this.maxGreen,
+      calculatedDuration: recommendedGreenDuration,
+      nextRecommendedPhase: nextRecommendedPhase,
       reasoningText: this.lastDecisionText,
-      nsDemand: this.nsDemandScore,
-      ewDemand: this.ewDemandScore
+      demands: this.demands
     };
   }
 
   /**
    * Multi-factor heuristic score:
-   * Score = (VehicleCount * 1.8) + (AvgWaitSeconds * 0.4) + (ApproachingWithin150px * 0.6)
+   * Score = (VehicleCount * 1.8) + (AvgWaitSeconds * 0.4) + (ApproachingCount * 0.5)
    */
   calculateApproachDemand(vehicles) {
     if (!vehicles || vehicles.length === 0) {
@@ -155,7 +159,7 @@ class AdaptiveSignalAI {
     }
 
     const avgWait = queuedCount > 0 ? (totalWaitTime / queuedCount) : 0;
-    const demand = (queuedCount * 1.8) + (avgWait * 0.4) + (approachingCount * 0.6);
+    const demand = (queuedCount * 1.8) + (avgWait * 0.4) + (approachingCount * 0.5);
 
     return {
       count: queuedCount,

@@ -1,7 +1,9 @@
 /**
- * TrafficSignalController
- * Safe phase transitions, fail-safe interlocks, all-red clearance,
- * countdown timers, and emergency corridor overrides.
+ * TrafficSignalController - 4-Phase Single Direction System (Indian Standard)
+ * In Indian junctions, only ONE single direction (arm) has GREEN at a time:
+ * NORTH ONLY -> EAST ONLY -> SOUTH ONLY -> WEST ONLY.
+ * All other 3 directions are strictly RED, ensuring completely conflict-free
+ * movements for straight, left, and right turns.
  */
 
 // Signal light states
@@ -11,23 +13,29 @@ const SignalColor = {
   GREEN: 'GREEN'
 };
 
-// Intersection movement phases
+// Intersection movement phases - 4 distinct directional phases
 const Phase = {
-  NORTH_SOUTH: 'NORTH_SOUTH',
-  EAST_WEST: 'EAST_WEST',
+  NORTH: 'NORTH',
+  EAST: 'EAST',
+  SOUTH: 'SOUTH',
+  WEST: 'WEST',
   EMERGENCY_OVERRIDE: 'EMERGENCY_OVERRIDE'
 };
+
+// Clockwise Indian sequence
+const PhaseSequence = [Phase.NORTH, Phase.EAST, Phase.SOUTH, Phase.WEST];
 
 class TrafficSignalController {
   constructor() {
     // Current phase & sub-state
-    this.activePhase = Phase.NORTH_SOUTH;
-    this.phaseState = SignalColor.GREEN; // Current sub-state of active phase: GREEN, AMBER, or ALL_RED
+    this.phaseIndex = 0;
+    this.activePhase = PhaseSequence[this.phaseIndex]; // Starts with NORTH
+    this.phaseState = SignalColor.GREEN; // GREEN, AMBER, or ALL_RED
 
     // Timing parameters (in seconds)
-    this.fixedGreenDuration = 18.0;
-    this.amberDuration = 3.5;
-    this.allRedClearanceDuration = 2.5;
+    this.fixedGreenDuration = 14.0;
+    this.amberDuration = 3.0;
+    this.allRedClearanceDuration = 2.0;
 
     // Active timer tracking
     this.currentPhaseTargetTime = this.fixedGreenDuration;
@@ -35,10 +43,10 @@ class TrafficSignalController {
     this.isAllRedClearance = false;
 
     // Safety Interlock - Tracks which directions have GREEN
-    // Rule: Conflicting pairs can NEVER be green simultaneously
+    // Rule: Exactly ONE direction can have GREEN/AMBER. Other 3 MUST be RED!
     this.signals = {
       NORTH: SignalColor.GREEN,
-      SOUTH: SignalColor.GREEN,
+      SOUTH: SignalColor.RED,
       EAST: SignalColor.RED,
       WEST: SignalColor.RED
     };
@@ -46,24 +54,24 @@ class TrafficSignalController {
     // Emergency Green Corridor Request
     this.emergencyRequest = null; // { direction, requestedAt, active }
     this.emergencyActive = false;
-    this.originalPhaseBeforeEmergency = null;
 
     // Next scheduled phase after clearance
-    this.nextPhase = Phase.EAST_WEST;
+    this.nextPhase = Phase.EAST;
 
     // Interlock integrity check
     this.verifySafetyInterlock();
   }
 
   reset() {
-    this.activePhase = Phase.NORTH_SOUTH;
+    this.phaseIndex = 0;
+    this.activePhase = PhaseSequence[this.phaseIndex];
     this.phaseState = SignalColor.GREEN;
     this.currentPhaseTargetTime = this.fixedGreenDuration;
     this.phaseElapsedTime = 0;
     this.isAllRedClearance = false;
     this.emergencyRequest = null;
     this.emergencyActive = false;
-    this.nextPhase = Phase.EAST_WEST;
+    this.nextPhase = Phase.EAST;
     this.updateSignalOutputs();
   }
 
@@ -80,36 +88,26 @@ class TrafficSignalController {
     };
 
     // Check if the requested direction is ALREADY in green
-    const isNs = (direction === 'NORTH' || direction === 'SOUTH');
-    const isCurrentNs = (this.activePhase === Phase.NORTH_SOUTH);
-
-    if (isCurrentNs === isNs && this.phaseState === SignalColor.GREEN) {
-      // Already green! Keep green and hold phase for ambulance
+    if (this.activePhase === direction && this.phaseState === SignalColor.GREEN) {
+      // Already green! Hold phase for ambulance
       this.emergencyActive = true;
       this.currentPhaseTargetTime = Math.max(this.currentPhaseTargetTime, 20.0);
     } else {
-      // Conflicting phase is active! Fast-track clearance
+      // Another direction is currently green! Fast-track clearance
       if (this.phaseState === SignalColor.GREEN) {
-        // Immediately switch to amber to begin safe clearance
-        this.phaseState = SignalColor.AMBER;
-        this.phaseElapsedTime = 0;
-        this.currentPhaseTargetTime = this.amberDuration;
-        this.updateSignalOutputs();
+        this.triggerAmber();
       }
     }
   }
 
   releaseEmergencyCorridor() {
     if (this.emergencyActive || this.emergencyRequest) {
-      console.log('[SignalController] Emergency vehicle exited. Resuming standard signal cycle.');
+      console.log('[SignalController] Emergency vehicle exited. Resuming normal single-arm cycle.');
       this.emergencyRequest = null;
       this.emergencyActive = false;
 
-      // Begin standard amber -> clearance -> alternate phase
-      this.phaseState = SignalColor.AMBER;
-      this.phaseElapsedTime = 0;
-      this.currentPhaseTargetTime = this.amberDuration;
-      this.updateSignalOutputs();
+      // Begin standard amber -> clearance -> next phase
+      this.triggerAmber();
     }
   }
 
@@ -117,14 +115,14 @@ class TrafficSignalController {
    * Update signal timing in fixed-timestep
    * @param {number} dt Delta time in seconds
    * @param {boolean} isIntersectionClear True if no vehicles are occupying the central box
-   * @param {Object} adaptiveTiming Optional adaptive green duration override
+   * @param {Object} adaptiveTiming Optional adaptive recommendations
    */
   update(dt, isIntersectionClear = true, adaptiveTiming = null) {
     this.phaseElapsedTime += dt;
 
     // Handle Active Emergency Override
     if (this.emergencyRequest && !this.emergencyActive) {
-      // We are waiting to clear the intersection for emergency direction
+      // Waiting to clear intersection for emergency direction
       if (this.isAllRedClearance && isIntersectionClear) {
         this.startEmergencyGreen(this.emergencyRequest.direction);
         return;
@@ -134,7 +132,6 @@ class TrafficSignalController {
     // State machine for current phase
     switch (this.phaseState) {
       case SignalColor.GREEN:
-        // Check if green time elapsed or adaptive early cutoff requested
         let targetDuration = this.fixedGreenDuration;
         if (adaptiveTiming && adaptiveTiming.recommendedGreenDuration) {
           targetDuration = adaptiveTiming.recommendedGreenDuration;
@@ -153,7 +150,6 @@ class TrafficSignalController {
 
       case SignalColor.AMBER:
         if (this.phaseElapsedTime >= this.amberDuration) {
-          // Transition to ALL-RED Clearance
           this.triggerAllRedClearance();
         }
         break;
@@ -182,7 +178,8 @@ class TrafficSignalController {
     this.isAllRedClearance = true;
     this.phaseElapsedTime = 0;
     this.currentPhaseTargetTime = this.allRedClearanceDuration;
-    // Set all signals strictly to RED
+
+    // Set ALL 4 signals strictly to RED
     this.signals.NORTH = SignalColor.RED;
     this.signals.SOUTH = SignalColor.RED;
     this.signals.EAST = SignalColor.RED;
@@ -191,24 +188,18 @@ class TrafficSignalController {
 
   startEmergencyGreen(direction) {
     this.emergencyActive = true;
-    this.activePhase = Phase.EMERGENCY_OVERRIDE;
+    this.activePhase = direction;
     this.phaseState = SignalColor.GREEN;
     this.isAllRedClearance = false;
     this.phaseElapsedTime = 0;
-    this.currentPhaseTargetTime = 25.0; // Ample green corridor
+    this.currentPhaseTargetTime = 22.0; // Dedicated green corridor
 
-    // Release only the emergency direction and its parallel non-conflicting direction
-    if (direction === 'NORTH' || direction === 'SOUTH') {
-      this.signals.NORTH = SignalColor.GREEN;
-      this.signals.SOUTH = SignalColor.GREEN;
-      this.signals.EAST = SignalColor.RED;
-      this.signals.WEST = SignalColor.RED;
-    } else {
-      this.signals.NORTH = SignalColor.RED;
-      this.signals.SOUTH = SignalColor.RED;
-      this.signals.EAST = SignalColor.GREEN;
-      this.signals.WEST = SignalColor.GREEN;
-    }
+    // Release ONLY the emergency direction. Other 3 directions are RED!
+    this.signals.NORTH = SignalColor.RED;
+    this.signals.SOUTH = SignalColor.RED;
+    this.signals.EAST = SignalColor.RED;
+    this.signals.WEST = SignalColor.RED;
+    this.signals[direction] = SignalColor.GREEN;
 
     if (window.soundFX) window.soundFX.playSignalChime();
   }
@@ -218,15 +209,17 @@ class TrafficSignalController {
     this.phaseElapsedTime = 0;
     this.phaseState = SignalColor.GREEN;
 
-    // Alternate phases or set according to nextPhase
-    if (this.activePhase === Phase.NORTH_SOUTH) {
-      this.activePhase = Phase.EAST_WEST;
-      this.nextPhase = Phase.NORTH_SOUTH;
+    if (adaptiveTiming && adaptiveTiming.nextRecommendedPhase) {
+      // Adaptive AI picked the next direction based on highest queue
+      this.activePhase = adaptiveTiming.nextRecommendedPhase;
+      this.phaseIndex = PhaseSequence.indexOf(this.activePhase);
     } else {
-      this.activePhase = Phase.NORTH_SOUTH;
-      this.nextPhase = Phase.EAST_WEST;
+      // Standard sequential progression: NORTH -> EAST -> SOUTH -> WEST
+      this.phaseIndex = (this.phaseIndex + 1) % PhaseSequence.length;
+      this.activePhase = PhaseSequence[this.phaseIndex];
     }
 
+    // Set duration
     if (adaptiveTiming && adaptiveTiming.calculatedDuration) {
       this.currentPhaseTargetTime = adaptiveTiming.calculatedDuration;
     } else {
@@ -238,9 +231,10 @@ class TrafficSignalController {
   }
 
   /**
-   * Hardware-grade interlock update to guarantee no cross-conflicts
+   * Hardware-grade interlock update to guarantee exactly ONE direction has green/amber!
    */
   updateSignalOutputs() {
+    // If All-Red Clearance is active, everything is RED
     if (this.isAllRedClearance || this.phaseState === SignalColor.ALL_RED) {
       this.signals.NORTH = SignalColor.RED;
       this.signals.SOUTH = SignalColor.RED;
@@ -249,33 +243,33 @@ class TrafficSignalController {
       return;
     }
 
-    if (this.activePhase === Phase.NORTH_SOUTH) {
-      const activeColor = (this.phaseState === SignalColor.AMBER) ? SignalColor.AMBER : SignalColor.GREEN;
-      this.signals.NORTH = activeColor;
-      this.signals.SOUTH = activeColor;
-      // Conflicting cross street must be RED
-      this.signals.EAST = SignalColor.RED;
-      this.signals.WEST = SignalColor.RED;
-    } else if (this.activePhase === Phase.EAST_WEST) {
-      const activeColor = (this.phaseState === SignalColor.AMBER) ? SignalColor.AMBER : SignalColor.GREEN;
-      this.signals.EAST = activeColor;
-      this.signals.WEST = activeColor;
-      // Conflicting cross street must be RED
-      this.signals.NORTH = SignalColor.RED;
-      this.signals.SOUTH = SignalColor.RED;
+    const activeColor = (this.phaseState === SignalColor.AMBER) ? SignalColor.AMBER : SignalColor.GREEN;
+
+    // Reset all to RED
+    this.signals.NORTH = SignalColor.RED;
+    this.signals.SOUTH = SignalColor.RED;
+    this.signals.EAST = SignalColor.RED;
+    this.signals.WEST = SignalColor.RED;
+
+    // ONLY the active direction receives Green or Amber
+    if (this.signals[this.activePhase] !== undefined) {
+      this.signals[this.activePhase] = activeColor;
     }
   }
 
   /**
    * Deterministic fail-safe verification.
-   * Throws or overrides to all-red if a conflicting state is ever detected.
+   * In 1-way single-arm control, at most ONE direction may be non-RED!
    */
   verifySafetyInterlock() {
-    const isNsGreenOrAmber = (this.signals.NORTH !== SignalColor.RED || this.signals.SOUTH !== SignalColor.RED);
-    const isEwGreenOrAmber = (this.signals.EAST !== SignalColor.RED || this.signals.WEST !== SignalColor.RED);
+    let nonRedCount = 0;
+    if (this.signals.NORTH !== SignalColor.RED) nonRedCount++;
+    if (this.signals.SOUTH !== SignalColor.RED) nonRedCount++;
+    if (this.signals.EAST  !== SignalColor.RED) nonRedCount++;
+    if (this.signals.WEST  !== SignalColor.RED) nonRedCount++;
 
-    if (isNsGreenOrAmber && isEwGreenOrAmber) {
-      console.error('CRITICAL SAFETY INTERLOCK FAULT: Conflicting green/amber detected! Activating emergency all-red.');
+    if (nonRedCount > 1) {
+      console.error('CRITICAL SAFETY INTERLOCK FAULT: Multiple directions green/amber! Forcing all-red.');
       this.triggerAllRedClearance();
       return false;
     }
@@ -294,9 +288,7 @@ class TrafficSignalController {
   getActivePhaseDisplayName() {
     if (this.emergencyActive) return 'EMERGENCY CORRIDOR';
     if (this.isAllRedClearance) return 'CLEARANCE (ALL RED)';
-    if (this.activePhase === Phase.NORTH_SOUTH) return 'NORTH - SOUTH';
-    if (this.activePhase === Phase.EAST_WEST) return 'EAST - WEST';
-    return 'STANDBY';
+    return `${this.activePhase} ONLY`;
   }
 }
 

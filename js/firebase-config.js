@@ -1,26 +1,27 @@
 /**
- * Firebase Realtime Database Integration & Session Store
- * Official Firebase Web SDK integration with seamless LocalStorage fallback.
- * Stores simulation telemetry, session runs, and benchmark comparisons.
+ * Firebase Realtime Database & Firestore Integration & Session Store
+ * Official Firebase Web SDK integration configured for project: varuags
+ * Saves simulation telemetry, session runs, and benchmark comparisons to the cloud.
  */
 
 const FirebaseConfig = {
-  // Default / Placeholder configuration.
-  // Users or judges can input their own config via the UI modal or localStorage.
-  apiKey: "",
-  authDomain: "",
-  databaseURL: "",
-  projectId: "smart-traffic-junction",
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: ""
+  apiKey: "AIzaSyAVlPUgycOIF7dAG-KE0xU_7BQMc7qu05Q",
+  authDomain: "varuags.firebaseapp.com",
+  projectId: "varuags",
+  storageBucket: "varuags.firebasestorage.app",
+  messagingSenderId: "1045017841785",
+  appId: "1:1045017841785:web:abc029101633ccba6244a8",
+  measurementId: "G-0VE2SW7FYT",
+  databaseURL: "https://varuags-default-rtdb.firebaseio.com"
 };
 
 class FirebaseManager {
   constructor() {
     this.app = null;
-    this.db = null;
+    this.rtdb = null;
+    this.firestore = null;
     this.isCloudConnected = false;
+    this.cloudProvider = 'Local Fallback';
     this.sessionsCache = [];
     this.listeners = [];
     this.localStorageKey = 'smart_traffic_simulation_sessions';
@@ -44,12 +45,12 @@ class FirebaseManager {
     // 2. Load cached local sessions
     this.loadLocalSessions();
 
-    // 3. Attempt initialization if databaseURL or apiKey is provided
-    if (activeConfig.databaseURL && typeof firebase !== 'undefined') {
+    // 3. Connect to Firebase Cloud
+    if (typeof firebase !== 'undefined' && activeConfig.apiKey) {
       this.connectFirebase(activeConfig);
     } else {
       this.isCloudConnected = false;
-      this.updateUIStatus('Local Storage Mode (Standby)', false);
+      this.updateUIStatus('Local Storage Mode', false);
     }
   }
 
@@ -61,15 +62,43 @@ class FirebaseManager {
         this.app = firebase.app();
       }
 
-      this.db = firebase.database();
-      this.isCloudConnected = true;
-      this.updateUIStatus('Firebase Cloud Connected', true);
-      this.startCloudListener();
-      console.log('Firebase Realtime Database initialized successfully.');
+      let connectedServices = [];
+
+      // 1. Connect Firestore
+      if (typeof firebase.firestore === 'function') {
+        try {
+          this.firestore = firebase.firestore();
+          connectedServices.push('Firestore');
+          this.startFirestoreListener();
+        } catch (e) {
+          console.warn('Firestore initialization notice:', e.message);
+        }
+      }
+
+      // 2. Connect Realtime Database
+      if (typeof firebase.database === 'function') {
+        try {
+          this.rtdb = firebase.database();
+          connectedServices.push('Realtime DB');
+          this.startRtdbListener();
+        } catch (e) {
+          console.warn('Realtime Database initialization notice:', e.message);
+        }
+      }
+
+      if (connectedServices.length > 0) {
+        this.isCloudConnected = true;
+        this.cloudProvider = connectedServices.join(' & ');
+        this.updateUIStatus(`Firebase Connected (${this.cloudProvider})`, true);
+        console.log(`Firebase connected successfully for project [${config.projectId}] via ${this.cloudProvider}.`);
+      } else {
+        this.isCloudConnected = false;
+        this.updateUIStatus('Local Storage Mode', false);
+      }
     } catch (err) {
-      console.warn('Firebase init notice: Running with local resilient storage.', err.message);
+      console.warn('Firebase init exception: Using local storage cache.', err.message);
       this.isCloudConnected = false;
-      this.updateUIStatus('Local Storage (Cloud Unreachable)', false);
+      this.updateUIStatus('Local Storage (Cloud Offline)', false);
     }
   }
 
@@ -81,7 +110,7 @@ class FirebaseManager {
   getConfig() {
     const saved = localStorage.getItem(this.configStorageKey);
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
+      try { return { ...FirebaseConfig, ...JSON.parse(saved) }; } catch (e) {}
     }
     return FirebaseConfig;
   }
@@ -105,12 +134,11 @@ class FirebaseManager {
     }
   }
 
-  startCloudListener() {
-    if (!this.db || !this.isCloudConnected) return;
-
+  startRtdbListener() {
+    if (!this.rtdb) return;
     try {
-      const sessionsRef = this.db.ref('simulation_sessions').limitToLast(30);
-      sessionsRef.on('value', (snapshot) => {
+      const ref = this.rtdb.ref('simulation_sessions').limitToLast(30);
+      ref.on('value', (snapshot) => {
         const val = snapshot.val();
         if (val) {
           const cloudList = Object.keys(val).map(key => ({
@@ -118,24 +146,55 @@ class FirebaseManager {
             ...val[key]
           }));
           cloudList.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-          this.sessionsCache = cloudList;
-          this.notifyListeners();
+          this.mergeSessions(cloudList);
         }
       }, (error) => {
-        console.warn('Firebase realtime listener error, falling back to local cache:', error);
+        console.warn('RTDB realtime listener error:', error.message);
       });
     } catch (e) {
-      console.warn('Listener setup exception:', e);
+      console.warn('RTDB listener setup error:', e);
     }
+  }
+
+  startFirestoreListener() {
+    if (!this.firestore) return;
+    try {
+      this.firestore.collection('simulation_sessions')
+        .orderBy('timestamp', 'desc')
+        .limit(30)
+        .onSnapshot((snapshot) => {
+          if (!snapshot.empty) {
+            const list = [];
+            snapshot.forEach(doc => {
+              list.push({ id: doc.id, ...doc.data() });
+            });
+            this.mergeSessions(list);
+          }
+        }, (error) => {
+          console.warn('Firestore onSnapshot listener error (rules may require write):', error.message);
+        });
+    } catch (e) {
+      console.warn('Firestore listener setup error:', e);
+    }
+  }
+
+  mergeSessions(cloudList) {
+    const map = new Map();
+    // Insert local cached first
+    this.sessionsCache.forEach(s => map.set(s.id, s));
+    // Overwrite/Add cloud sessions
+    cloudList.forEach(s => map.set(s.id, s));
+
+    const merged = Array.from(map.values());
+    merged.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    this.sessionsCache = merged.slice(0, 50);
+    this.saveLocalSessions();
+    this.notifyListeners();
   }
 
   /**
    * Save a completed simulation session
    * @param {Object} sessionData
-   * {
-   *   id, timestamp, durationSeconds, mode, totalCarsPassed, avgWaitTime,
-   *   maxQueue, throughput, spawnRate, efficiencyDelta
-   * }
    */
   async saveSession(sessionData) {
     const session = {
@@ -143,28 +202,43 @@ class FirebaseManager {
       id: sessionData.id || `session_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       timestamp: Date.now(),
       savedAt: new Date().toLocaleTimeString(),
-      source: this.isCloudConnected ? 'Firebase Realtime DB' : 'Local Storage'
+      source: this.isCloudConnected ? `Firebase Cloud (${this.cloudProvider})` : 'Local Storage'
     };
 
-    // Always keep in local memory/storage
+    // Keep in local cache
     this.sessionsCache.unshift(session);
     if (this.sessionsCache.length > 50) this.sessionsCache.pop();
     this.saveLocalSessions();
     this.notifyListeners();
 
-    // If connected to Firebase Realtime Database, push to cloud
-    if (this.isCloudConnected && this.db) {
+    let savedTargets = [];
+
+    // 1. Push to Realtime Database
+    if (this.rtdb) {
       try {
-        await this.db.ref(`simulation_sessions/${session.id}`).set(session);
-        console.log('Session synced to Firebase Cloud:', session.id);
-        return { success: true, target: 'firebase' };
+        await this.rtdb.ref(`simulation_sessions/${session.id}`).set(session);
+        savedTargets.push('Realtime DB');
       } catch (err) {
-        console.warn('Firebase push failed, kept in local storage:', err);
-        return { success: true, target: 'local_fallback', error: err.message };
+        console.warn('Realtime Database push notice:', err.message);
       }
     }
 
-    return { success: true, target: 'local' };
+    // 2. Push to Firestore
+    if (this.firestore) {
+      try {
+        await this.firestore.collection('simulation_sessions').doc(session.id).set(session);
+        savedTargets.push('Firestore');
+      } catch (err) {
+        console.warn('Firestore push notice:', err.message);
+      }
+    }
+
+    if (savedTargets.length > 0) {
+      console.log(`Session successfully saved to Firebase (${savedTargets.join(', ')}):`, session.id);
+      return { success: true, target: savedTargets.join(' & ') };
+    }
+
+    return { success: true, target: 'Local Storage Fallback' };
   }
 
   getSessions() {
@@ -175,10 +249,8 @@ class FirebaseManager {
     this.sessionsCache = [];
     localStorage.removeItem(this.localStorageKey);
 
-    if (this.isCloudConnected && this.db) {
-      try {
-        this.db.ref('simulation_sessions').remove();
-      } catch (e) {}
+    if (this.rtdb) {
+      try { this.rtdb.ref('simulation_sessions').remove(); } catch (e) {}
     }
     this.notifyListeners();
   }
@@ -217,7 +289,7 @@ class FirebaseManager {
       }
     }
     if (textSpan) {
-      textSpan.textContent = isConnected ? 'Firebase: Live Cloud' : 'Firebase: Local Mode';
+      textSpan.textContent = isConnected ? 'Firebase: varuags (Connected)' : 'Firebase: Local Mode';
     }
     if (modalStatus) {
       modalStatus.textContent = statusText;
