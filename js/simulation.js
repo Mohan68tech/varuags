@@ -589,7 +589,7 @@ class SimulationEngine {
   }
 
   renderRoads(ctx) {
-    ctx.fillStyle = this.isNightMode ? '#141d2e' : '#1e2638';
+    ctx.fillStyle = this.isNightMode ? '#101726' : '#1e2638';
 
     // North-South Vertical Road
     ctx.fillRect(this.cx - this.roadHalfWidth, 0, this.roadHalfWidth * 2, this.height);
@@ -597,27 +597,49 @@ class SimulationEngine {
     // East-West Horizontal Road
     ctx.fillRect(0, this.cy - this.roadHalfWidth, this.width, this.roadHalfWidth * 2);
 
-    // Curbs / Road Borders
-    ctx.strokeStyle = '#38bdf8';
-    ctx.lineWidth = 1.5;
-    ctx.globalAlpha = 0.3;
+    // Realistic Indian Alternating Yellow & Black Safety Curbs along corners
+    this.renderIndianKerbstones(ctx);
+  }
 
-    // 4 Corner Curbs
+  renderIndianKerbstones(ctx) {
     const rL = this.cx - this.roadHalfWidth;
     const rR = this.cx + this.roadHalfWidth;
     const rT = this.cy - this.roadHalfWidth;
     const rB = this.cy + this.roadHalfWidth;
+    const kerbSize = 8;
+    const segLen = 16;
 
-    // NW curb
-    ctx.strokeRect(0, 0, rL, rT);
-    // NE curb
-    ctx.strokeRect(rR, 0, this.width - rR, rT);
-    // SW curb
-    ctx.strokeRect(0, rB, rL, this.height - rB);
-    // SE curb
-    ctx.strokeRect(rR, rB, this.width - rR, this.height - rB);
+    // Corner kerb drawing helper
+    const drawKerbStrip = (x1, y1, x2, y2, isVert) => {
+      const len = isVert ? Math.abs(y2 - y1) : Math.abs(x2 - x1);
+      const steps = Math.floor(len / segLen);
+      for (let i = 0; i < steps; i++) {
+        ctx.fillStyle = (i % 2 === 0) ? '#eab308' : '#0f172a'; // Yellow & Black
+        if (isVert) {
+          const sy = Math.min(y1, y2) + i * segLen;
+          ctx.fillRect(x1 - (x1 < this.cx ? kerbSize : 0), sy, kerbSize, segLen);
+        } else {
+          const sx = Math.min(x1, x2) + i * segLen;
+          ctx.fillRect(sx, y1 - (y1 < this.cy ? kerbSize : 0), segLen, kerbSize);
+        }
+      }
+    };
 
-    ctx.globalAlpha = 1.0;
+    // NW Kerbs
+    drawKerbStrip(0, rT, rL, rT, false);
+    drawKerbStrip(rL, 0, rL, rT, true);
+
+    // NE Kerbs
+    drawKerbStrip(rR, rT, this.width, rT, false);
+    drawKerbStrip(rR, 0, rR, rT, true);
+
+    // SW Kerbs
+    drawKerbStrip(0, rB, rL, rB, false);
+    drawKerbStrip(rL, rB, rL, this.height, true);
+
+    // SE Kerbs
+    drawKerbStrip(rR, rB, this.width, rB, false);
+    drawKerbStrip(rR, rB, rR, this.height, true);
   }
 
   renderMarkings(ctx) {
@@ -680,33 +702,31 @@ class SimulationEngine {
 
     ctx.setLineDash([]); // Reset line dash
 
-    // 3. Stop Lines (Solid Bright White Bar before intersection)
-    ctx.strokeStyle = '#ffffff';
+    // 3. Stop Lines with Dynamic Signal Glow
     ctx.lineWidth = 5;
 
-    // North Stop Line (Incoming side: cx to cx + rw)
-    ctx.beginPath();
-    ctx.moveTo(cx, cy - rw);
-    ctx.lineTo(cx + rw, cy - rw);
-    ctx.stroke();
+    // Helper to draw stop line with signal status color
+    const drawStopLine = (x1, y1, x2, y2, dir) => {
+      const sig = this.signalController.getSignalForDirection(dir);
+      const isRed = (sig === SignalColor.RED || sig === SignalColor.AMBER);
+      ctx.strokeStyle = isRed ? '#ff4d6d' : '#00e676';
+      ctx.shadowColor = isRed ? '#ff4d6d' : '#00e676';
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    };
 
-    // South Stop Line (Incoming side: cx - rw to cx)
-    ctx.beginPath();
-    ctx.moveTo(cx - rw, cy + rw);
-    ctx.lineTo(cx, cy + rw);
-    ctx.stroke();
-
-    // West Stop Line (Incoming side: cy - rw to cy)
-    ctx.beginPath();
-    ctx.moveTo(cx - rw, cy - rw);
-    ctx.lineTo(cx - rw, cy);
-    ctx.stroke();
-
-    // East Stop Line (Incoming side: cy to cy + rw)
-    ctx.beginPath();
-    ctx.moveTo(cx + rw, cy);
-    ctx.lineTo(cx + rw, cy + rw);
-    ctx.stroke();
+    // North Stop Line
+    drawStopLine(cx, cy - rw, cx + rw, cy - rw, 'NORTH');
+    // South Stop Line
+    drawStopLine(cx - rw, cy + rw, cx, cy + rw, 'SOUTH');
+    // West Stop Line
+    drawStopLine(cx - rw, cy - rw, cx - rw, cy, 'WEST');
+    // East Stop Line
+    drawStopLine(cx + rw, cy, cx + rw, cy + rw, 'EAST');
 
     // 4. Zebra Crossings (Pedestrian Walkways)
     this.renderZebraCrossings(ctx);
@@ -869,6 +889,29 @@ class SimulationEngine {
 
     ctx.fillStyle = radial;
     ctx.fillRect(0, 0, this.width, this.height);
+
+    // Warm Halos for 4 Corner Streetlights
+    const rw = this.roadHalfWidth;
+    const corners = [
+      { x: this.cx - rw - 18, y: this.cy - rw - 18 },
+      { x: this.cx + rw + 18, y: this.cy - rw - 18 },
+      { x: this.cx - rw - 18, y: this.cy + rw + 18 },
+      { x: this.cx + rw + 18, y: this.cy + rw + 18 }
+    ];
+
+    corners.forEach(c => {
+      // Light pole
+      ctx.fillStyle = '#64748b';
+      ctx.beginPath(); ctx.arc(c.x, c.y, 4, 0, Math.PI * 2); ctx.fill();
+
+      // Soft warm amber streetlight halo
+      const lightHalo = ctx.createRadialGradient(c.x, c.y, 2, c.x, c.y, 55);
+      lightHalo.addColorStop(0, 'rgba(253, 224, 71, 0.4)');
+      lightHalo.addColorStop(0.5, 'rgba(253, 224, 71, 0.12)');
+      lightHalo.addColorStop(1, 'rgba(253, 224, 71, 0)');
+      ctx.fillStyle = lightHalo;
+      ctx.beginPath(); ctx.arc(c.x, c.y, 55, 0, Math.PI * 2); ctx.fill();
+    });
   }
 }
 
