@@ -241,6 +241,27 @@ class FirebaseManager {
     return { success: true, target: 'Local Storage Fallback' };
   }
 
+  /**
+   * Save a red-light traffic violation / e-challan to Firebase Cloud
+   * @param {Object} violationData
+   */
+  async saveViolation(violationData) {
+    if (this.rtdb) {
+      try {
+        await this.rtdb.ref(`traffic_violations/${violationData.id}`).set(violationData);
+      } catch (e) {
+        console.warn('Violation RTDB save error:', e.message);
+      }
+    }
+    if (this.firestore) {
+      try {
+        await this.firestore.collection('traffic_violations').doc(violationData.id).set(violationData);
+      } catch (e) {
+        console.warn('Violation Firestore save error:', e.message);
+      }
+    }
+  }
+
   getSessions() {
     return this.sessionsCache;
   }

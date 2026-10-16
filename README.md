@@ -46,6 +46,14 @@ A professional, interactive, browser-based traffic engineering and AI simulation
 - **Configuration Modal**: In-app configuration modal allows entering Firebase credentials (`databaseURL`, `apiKey`, `projectId`) and testing live connectivity on demand.
 - **Session History & JSON Export**: Interactive table of past runs with one-click JSON data export.
 
+### 6. AI Red-Light Camera & Automated E-Challan System
+- **Real-Time Violation Sensed**: AI camera monitors stop lines; triggers instant capture if a vehicle jumps a RED signal.
+- **Visual Strobe & Crosshair**: Canvas renders a camera flash effect with laser targeting and a floating violator license plate HUD.
+- **Indian HSRP License Plates**: Formats authentic Maharashtra High-Security Registration Plates (e.g. `MH-20-FR-6953`).
+- **Vehicle Telemetry Captured**: Logs vehicle type (Car/Auto/Bike/Bus), crossing direction, speed (km/h), and timestamp.
+- **Automated Fine & Cloud Sync**: Generates an automated ₹1,000 fine under the Indian Motor Vehicles Act, stored in Firebase Realtime Database and Firestore under `/traffic_violations`.
+- **Interactive Demo Trigger**: "Test Red-Light Jump" button allows immediate live demonstration for hackathon judges.
+
 ---
 
 ## 📁 Project Structure

@@ -41,6 +41,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const emergencyDirectionSelect = document.getElementById('emergencyDirectionSelect');
   const corridorBadge = document.getElementById('corridorBadge');
 
+  // AI Red-Light Camera & E-Challan Controls
+  const btnSimulateViolation = document.getElementById('btnSimulateViolation');
+  const violationCountBadge = document.getElementById('violationCountBadge');
+  const violatorFeed = document.getElementById('violatorFeed');
+
   // Quick Toggles
   const nightModeToggle = document.getElementById('nightModeToggle');
   const soundToggle = document.getElementById('soundToggle');
@@ -104,6 +109,10 @@ document.addEventListener('DOMContentLoaded', () => {
       sim.stats.archiveRun(sim.simMode);
     }
     sim.reset();
+    if (violationCountBadge) violationCountBadge.textContent = '0 VIOLATIONS';
+    if (violatorFeed) {
+      violatorFeed.innerHTML = '<div class="violator-empty text-muted"><i class="fa-solid fa-shield-check text-success"></i> All vehicles obeying red signals</div>';
+    }
     updatePlaybackUI('STOPPED');
   });
 
@@ -215,6 +224,45 @@ document.addEventListener('DOMContentLoaded', () => {
         corridorBadge.className = 'badge badge-emergency';
       }
     }, 15000);
+  });
+
+  // -------------------------------------------------------------
+  // AI RED-LIGHT ENFORCEMENT & E-CHALLAN
+  // -------------------------------------------------------------
+  if (btnSimulateViolation) {
+    btnSimulateViolation.addEventListener('click', () => {
+      if (window.soundFX) window.soundFX.playClick();
+      if (!sim.isRunning) {
+        sim.start();
+        updatePlaybackUI('RUNNING');
+      }
+      sim.simulateRedLightJump();
+    });
+  }
+
+  sim.onViolation((rec, allViolations) => {
+    if (violationCountBadge) {
+      violationCountBadge.textContent = `${allViolations.length} VIOLATION${allViolations.length > 1 ? 'S' : ''}`;
+      violationCountBadge.className = 'badge badge-emergency fa-beat';
+      setTimeout(() => {
+        violationCountBadge.className = 'badge badge-emergency';
+      }, 3000);
+    }
+
+    if (violatorFeed) {
+      violatorFeed.innerHTML = allViolations.map(v => `
+        <div class="violator-item">
+          <div class="violator-top">
+            <div class="hsrp-plate"><span class="hsrp-ind">IND</span>${v.plateNumber}</div>
+            <span class="violator-fine">₹${v.fineAmount} E-Challan</span>
+          </div>
+          <div class="violator-details">
+            <span><i class="fa-solid fa-car-side"></i> <strong>${v.vehicleType}</strong> (${v.direction})</span>
+            <span><i class="fa-solid fa-gauge-simple-high"></i> ${v.speedKmph} km/h • ${v.timeStr}</span>
+          </div>
+        </div>
+      `).join('');
+    }
   });
 
   // -------------------------------------------------------------
