@@ -62,6 +62,12 @@ class SimulationEngine {
       EAST:  { x1: this.cx + this.stopDistance, y1: this.cy, x2: this.cx + this.stopDistance, y2: this.cy + this.roadHalfWidth },
       WEST:  { x1: this.cx - this.stopDistance, y1: this.cy - this.roadHalfWidth, x2: this.cx - this.stopDistance, y2: this.cy }
     };
+
+    // AI Red-Light Camera & E-Challan State
+    this.violations = [];
+    this.cameraFlashTick = 0;
+    this.cameraFlashPos = null;
+    this.onViolationListeners = [];
   }
 
   start() {
@@ -100,6 +106,8 @@ class SimulationEngine {
     this.signalController.reset();
     this.adaptiveAI.reset();
     this.stats.resetCurrentRun();
+    this.violations = [];
+    this.cameraFlashTick = 0;
 
     this.spawnTimers = { NORTH: 0, SOUTH: 0, EAST: 0, WEST: 0 };
     if (window.soundFX) window.soundFX.stopSiren();
@@ -361,10 +369,28 @@ class SimulationEngine {
       // 1. Determine vehicle's desired target speed
       const targetSpeed = this.calculateTargetSpeed(v);
 
+      // Track if entering intersection on this frame
+      const wasCommitted = v.isCommittedToIntersection;
+
       // 2. Physics & path integration
       v.update(dt, targetSpeed, geom);
 
-      // 3. Check if out of bounds (completed route)
+      // 3. AI Speed & Red-Light Camera Detection: Check if vehicle breached stop line on RED!
+      if (!wasCommitted && v.isCommittedToIntersection) {
+        const signal = this.signalController.getSignalForDirection(v.direction);
+        const isFreeLeftTurn = (
+          this.freeLeftTurnEnabled &&
+          v.route === RouteType.LEFT &&
+          v.lane === 0
+        );
+
+        if ((signal === SignalColor.RED || signal === SignalColor.AMBER) && !isFreeLeftTurn && !v.isEmergency) {
+          v.hasViolatedRedLight = true;
+          this.recordViolation(v);
+        }
+      }
+
+      // 4. Check if out of bounds (completed route)
       if (v.isOutOfBounds(this.width, this.height)) {
         this.stats.recordVehicleExit(v);
       } else {
@@ -422,14 +448,19 @@ class SimulationEngine {
       } else {
         // Standard signal compliance
         if (signal === SignalColor.RED || signal === SignalColor.AMBER) {
-          // Must stop before the stop line
-          if (distToStop > 0 && distToStop < 90) {
-            if (distToStop <= 10) {
-              return 0; // Stop firmly behind line
+          if (v.isForcedViolator) {
+            // Aggressive driver jumps red light!
+            desiredSpeed = v.maxSpeed * 1.15;
+          } else {
+            // Must stop before the stop line
+            if (distToStop > 0 && distToStop < 90) {
+              if (distToStop <= 10) {
+                return 0; // Stop firmly behind line
+              }
+              // Decelerate smoothly to stop line
+              const brakingFactor = (distToStop - 10) / 80;
+              desiredSpeed = Math.min(desiredSpeed, v.maxSpeed * brakingFactor * 0.7);
             }
-            // Decelerate smoothly to stop line
-            const brakingFactor = (distToStop - 10) / 80;
-            desiredSpeed = Math.min(desiredSpeed, v.maxSpeed * brakingFactor * 0.7);
           }
         }
       }
@@ -568,6 +599,92 @@ class SimulationEngine {
     // 7. Ambient Lighting (Night Mode Dark Vignette & Streetlights)
     if (this.isNightMode) {
       this.renderNightAmbient(ctx);
+    }
+
+    // 8. AI Red-Light Camera Flash FX & Crosshair
+    if (this.cameraFlashTick > 0 && this.cameraFlashPos) {
+      ctx.save();
+      ctx.fillStyle = `rgba(255, 255, 255, ${this.cameraFlashTick * 2.2})`;
+      ctx.beginPath();
+      ctx.arc(this.cameraFlashPos.x, this.cameraFlashPos.y, 85, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Red laser targeting crosshair
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 2.5;
+      ctx.shadowColor = '#ef4444';
+      ctx.shadowBlur = 14;
+      ctx.strokeRect(this.cameraFlashPos.x - 32, this.cameraFlashPos.y - 32, 64, 64);
+
+      ctx.fillStyle = '#ef4444';
+      ctx.font = 'bold 12px JetBrains Mono, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('⚡ E-CHALLAN CAPTURED', this.cameraFlashPos.x, this.cameraFlashPos.y - 40);
+      ctx.restore();
+
+      this.cameraFlashTick -= 0.04;
+    }
+  }
+
+  recordViolation(v) {
+    const violation = {
+      id: `ECH-${Math.floor(1000 + Math.random() * 9000)}`,
+      plateNumber: v.plateNumber,
+      vehicleType: v.type.name,
+      direction: v.direction,
+      speedKmph: Math.round(v.maxSpeed * 22),
+      fineAmount: 1000, // ₹1,000 for signal jump under Indian MV Act
+      timestamp: Date.now(),
+      timeStr: new Date().toLocaleTimeString()
+    };
+
+    this.violations.unshift(violation);
+    if (this.violations.length > 25) this.violations.pop();
+
+    this.cameraFlashTick = 0.45;
+    this.cameraFlashPos = { x: v.x, y: v.y };
+
+    if (window.soundFX) window.soundFX.playCameraShutter();
+    if (window.firebaseManager) window.firebaseManager.saveViolation(violation);
+
+    this.onViolationListeners.forEach(cb => {
+      try { cb(violation, this.violations); } catch (e) {}
+    });
+  }
+
+  onViolation(callback) {
+    this.onViolationListeners.push(callback);
+  }
+
+  simulateRedLightJump(direction) {
+    if (!direction) {
+      const redDirs = ['NORTH', 'EAST', 'SOUTH', 'WEST'].filter(
+        d => this.signalController.getSignalForDirection(d) === SignalColor.RED
+      );
+      direction = redDirs[Math.floor(Math.random() * redDirs.length)] || 'NORTH';
+    }
+
+    // Find approaching vehicle on that direction or spawn one
+    const candidate = this.vehicles.find(
+      v => v.direction === direction && !v.isCommittedToIntersection && !v.isEmergency
+    );
+
+    if (candidate) {
+      candidate.isForcedViolator = true;
+      candidate.route = RouteType.STRAIGHT;
+    } else {
+      const spawnPos = this.getSpawnCoordinates(direction, 0);
+      const violator = new Vehicle({
+        type: VehicleType.CAR,
+        direction: direction,
+        lane: 0,
+        route: RouteType.STRAIGHT,
+        x: spawnPos.x,
+        y: spawnPos.y,
+        angle: spawnPos.angle,
+        isForcedViolator: true
+      });
+      this.vehicles.push(violator);
     }
   }
 

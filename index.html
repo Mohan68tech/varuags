@@ -203,6 +203,29 @@
           </div>
         </section>
 
+        <!-- AI Red-Light Camera & E-Challan Enforcement -->
+        <section class="dashboard-card echallan-card">
+          <div class="card-header">
+            <h3><i class="fa-solid fa-camera-retro text-amber"></i> AI E-Challan Camera</h3>
+            <span class="badge badge-emergency" id="violationCountBadge">0 VIOLATIONS</span>
+          </div>
+          <div class="card-body">
+            <p class="card-desc">Automatic AI camera detects vehicles crossing red stop lines, logs license plates & issues automated ₹1,000 E-Challans.</p>
+            <div class="echallan-btn-row">
+              <button id="btnSimulateViolation" class="btn btn-outline-cyan w-100" title="Trigger an aggressive vehicle jumping a red light">
+                <i class="fa-solid fa-bolt text-amber"></i> Test Red-Light Jump
+              </button>
+            </div>
+
+            <!-- Recent Violations Feed -->
+            <div class="violator-feed" id="violatorFeed">
+              <div class="violator-empty text-muted">
+                <i class="fa-solid fa-shield-check text-success"></i> All vehicles obeying red signals
+              </div>
+            </div>
+          </div>
+        </section>
+
         <!-- Cloud Session & Firebase Storage -->
         <section class="dashboard-card cloud-card">
           <div class="card-header">

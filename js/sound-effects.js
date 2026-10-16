@@ -180,6 +180,32 @@ class SoundEffects {
       this.sirenOsc = null;
     }
   }
+
+  // Camera snapshot sound for red-light violation detection
+  playCameraShutter() {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.audioCtx) return;
+
+    try {
+      const now = this.audioCtx.currentTime;
+      const osc = this.audioCtx.createOscillator();
+      const gain = this.audioCtx.createGain();
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(1400, now);
+      osc.frequency.exponentialRampToValueAtTime(320, now + 0.12);
+
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+
+      osc.connect(gain);
+      gain.connect(this.audioCtx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.15);
+    } catch (e) {}
+  }
 }
 
 // Global sound manager instance

@@ -51,12 +51,25 @@ class Vehicle {
     this.totalWaitTime = 0;
     this.spawnTime = performance.now();
 
+    // Indian RTO License Plate & Red-Light Violation detection
+    this.plateNumber = config.plateNumber || this.generateIndianPlate();
+    this.hasViolatedRedLight = false;
+    this.isForcedViolator = config.isForcedViolator || false;
+
     // Turn tracking
     this.turnProgress = 0;
     this.originalDirection = this.direction;
 
     // Siren strobe phase for emergency
     this.strobeTick = 0;
+  }
+
+  generateIndianPlate() {
+    const rto = 'MH-20'; // Maharashtra RTO (Chhatrapati Sambhajinagar)
+    const series = ['AB', 'BK', 'EQ', 'FR', 'CZ', 'DH', 'GM', 'JP', 'KN', 'TR'];
+    const letter = series[Math.floor(Math.random() * series.length)];
+    const num = Math.floor(1000 + Math.random() * 9000);
+    return `${rto}-${letter}-${num}`;
   }
 
   pickRandomColor() {
@@ -266,6 +279,30 @@ class Vehicle {
       this.drawTaillights(ctx, halfW, halfL, true);
     } else {
       this.drawTaillights(ctx, halfW, halfL, false);
+    }
+
+    // 5. Red-Light Violation HUD Marker & License Plate Tag
+    if (this.hasViolatedRedLight) {
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = '#ef4444';
+      ctx.shadowBlur = 12;
+      ctx.strokeRect(-halfW - 4, -halfL - 4, this.width + 8, this.length + 8);
+      ctx.shadowBlur = 0;
+
+      // License plate badge hovering above
+      ctx.save();
+      ctx.rotate(-this.angle); // Keep badge upright
+      ctx.fillStyle = '#ef4444';
+      ctx.beginPath();
+      ctx.roundRect(-42, -halfL - 26, 84, 18, 4);
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 9px JetBrains Mono, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(this.plateNumber, 0, -halfL - 14);
+      ctx.restore();
     }
 
     ctx.restore();
