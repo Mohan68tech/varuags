@@ -174,40 +174,90 @@ class Vehicle {
 
   /**
    * Execute smooth 90-degree Left Turn (LHD Indian Rule)
-   * Left turn is a compact inside arc
+   * Left turn follows inside arc from outer lane 0 to target outer lane 0
    */
   executeLeftTurn(distance, geom) {
-    const turnRadius = 45;
+    const turnRadius = 26; // (rw 100 - outer lane offset 74) = 26px
     const arcLength = (Math.PI / 2) * turnRadius;
     const progressDelta = distance / arcLength;
 
     this.turnProgress = Math.min(1.0, this.turnProgress + progressDelta);
+    const t = this.turnProgress;
+    const { cx, cy, rw } = geom;
 
-    const baseAngle = this.getDirectionBaseAngle(this.originalDirection);
-    // Left turn in LHD is turning counter-clockwise (angle decreases by PI/2)
-    this.angle = baseAngle - (this.turnProgress * Math.PI / 2);
+    switch (this.originalDirection) {
+      case 'NORTH':
+        // Enters at (cx + 74, cy - rw) heading South, exits at (cx + rw, cy - 74) heading East
+        this.x = (cx + rw) - turnRadius * Math.cos(t * Math.PI / 2);
+        this.y = (cy - rw) + turnRadius * Math.sin(t * Math.PI / 2);
+        this.angle = Math.PI / 2 - t * (Math.PI / 2);
+        break;
 
-    // Advance along the arc
-    this.x += Math.cos(this.angle) * distance;
-    this.y += Math.sin(this.angle) * distance;
+      case 'EAST':
+        // Enters at (cx + rw, cy + 74) heading West, exits at (cx + 74, cy + rw) heading South
+        this.x = (cx + rw) - turnRadius * Math.sin(t * Math.PI / 2);
+        this.y = (cy + rw) - turnRadius * Math.cos(t * Math.PI / 2);
+        this.angle = Math.PI - t * (Math.PI / 2);
+        break;
+
+      case 'SOUTH':
+        // Enters at (cx - 74, cy + rw) heading North, exits at (cx - rw, cy + 74) heading West
+        this.x = (cx - rw) + turnRadius * Math.cos(t * Math.PI / 2);
+        this.y = (cy + rw) - turnRadius * Math.sin(t * Math.PI / 2);
+        this.angle = -Math.PI / 2 - t * (Math.PI / 2);
+        break;
+
+      case 'WEST':
+        // Enters at (cx - rw, cy - 74) heading East, exits at (cx - 74, cy - rw) heading North
+        this.x = (cx - rw) + turnRadius * Math.sin(t * Math.PI / 2);
+        this.y = (cy - rw) + turnRadius * Math.cos(t * Math.PI / 2);
+        this.angle = 0 - t * (Math.PI / 2);
+        break;
+    }
   }
 
   /**
-   * Execute smooth 90-degree Right Turn
-   * Right turn in LHD crosses center to far lane (clockwise, angle increases by PI/2)
+   * Execute smooth 90-degree Right Turn (LHD Indian Rule)
+   * Right turn crosses junction from inner lane 1 to target inner lane 1 on the far side
    */
   executeRightTurn(distance, geom) {
-    const turnRadius = 75;
+    const turnRadius = 128; // rw (100) + inner lane offset (28) = 128px
     const arcLength = (Math.PI / 2) * turnRadius;
     const progressDelta = distance / arcLength;
 
     this.turnProgress = Math.min(1.0, this.turnProgress + progressDelta);
+    const t = this.turnProgress;
+    const { cx, cy, rw } = geom;
 
-    const baseAngle = this.getDirectionBaseAngle(this.originalDirection);
-    this.angle = baseAngle + (this.turnProgress * Math.PI / 2);
+    switch (this.originalDirection) {
+      case 'NORTH':
+        // Enters at (cx + 28, cy - rw) heading South, exits at (cx - rw, cy + 28) heading West
+        this.x = (cx + 28) - turnRadius * Math.sin(t * Math.PI / 2);
+        this.y = (cy + 28) - turnRadius * Math.cos(t * Math.PI / 2);
+        this.angle = Math.PI / 2 + t * (Math.PI / 2);
+        break;
 
-    this.x += Math.cos(this.angle) * distance;
-    this.y += Math.sin(this.angle) * distance;
+      case 'WEST':
+        // Enters at (cx - rw, cy - 28) heading East, exits at (cx + 28, cy + rw) heading South
+        this.x = (cx + 28) - turnRadius * Math.cos(t * Math.PI / 2);
+        this.y = (cy - 28) + turnRadius * Math.sin(t * Math.PI / 2);
+        this.angle = 0 + t * (Math.PI / 2);
+        break;
+
+      case 'SOUTH':
+        // Enters at (cx - 28, cy + rw) heading North, exits at (cx + rw, cy - 28) heading East
+        this.x = (cx - 28) + turnRadius * Math.sin(t * Math.PI / 2);
+        this.y = (cy - 28) + turnRadius * Math.cos(t * Math.PI / 2);
+        this.angle = -Math.PI / 2 + t * (Math.PI / 2);
+        break;
+
+      case 'EAST':
+        // Enters at (cx + rw, cy + 28) heading West, exits at (cx - 28, cy - rw) heading North
+        this.x = (cx - 28) + turnRadius * Math.cos(t * Math.PI / 2);
+        this.y = (cy + 28) - turnRadius * Math.sin(t * Math.PI / 2);
+        this.angle = Math.PI + t * (Math.PI / 2);
+        break;
+    }
   }
 
   getDirectionBaseAngle(dir) {
@@ -239,7 +289,11 @@ class Vehicle {
   render(ctx, isNightMode = false) {
     ctx.save();
     ctx.translate(this.x, this.y);
-    ctx.rotate(this.angle);
+    // Vehicle models are designed with front facing along +Y.
+    // In polar angles, movement heading 0 is East (+X), Math.PI/2 is South (+Y).
+    // Subtracting Math.PI/2 aligns the vehicle front with its velocity vector.
+    const renderAngle = this.angle - Math.PI / 2;
+    ctx.rotate(renderAngle);
 
     const halfW = this.width / 2;
     const halfL = this.length / 2;
@@ -292,7 +346,7 @@ class Vehicle {
 
       // License plate badge hovering above
       ctx.save();
-      ctx.rotate(-this.angle); // Keep badge upright
+      ctx.rotate(-renderAngle); // Keep badge upright
       ctx.fillStyle = '#ef4444';
       ctx.beginPath();
       ctx.roundRect(-42, -halfL - 26, 84, 18, 4);

@@ -517,7 +517,7 @@ class SimulationEngine {
   }
 
   getDistanceToStopLine(v) {
-    const buffer = 15; // Front bumper offset
+    const buffer = v.length / 2; // Front bumper offset based on vehicle heading length
     switch (v.direction) {
       case 'NORTH': return (this.cy - this.stopDistance) - (v.y + buffer);
       case 'SOUTH': return (v.y - buffer) - (this.cy + this.stopDistance);
@@ -881,13 +881,13 @@ class SimulationEngine {
     ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
     ctx.font = 'bold 10px Inter, sans-serif';
 
-    // North Approach Text
-    ctx.fillText('FREE LEFT ↵', this.cx + 48, this.cy - this.roadHalfWidth - 45);
-    ctx.fillText('STRAIGHT ↑', this.cx + 6, this.cy - this.roadHalfWidth - 45);
+    // North Approach Text (Southbound traffic moving downwards)
+    ctx.fillText('FREE LEFT ↳', this.cx + 48, this.cy - this.roadHalfWidth - 45);
+    ctx.fillText('STRAIGHT ↓', this.cx + 6, this.cy - this.roadHalfWidth - 45);
 
-    // South Approach Text
+    // South Approach Text (Northbound traffic moving upwards)
     ctx.fillText('FREE LEFT ↵', this.cx - 88, this.cy + this.roadHalfWidth + 55);
-    ctx.fillText('STRAIGHT ↓', this.cx - 40, this.cy + this.roadHalfWidth + 55);
+    ctx.fillText('STRAIGHT ↑', this.cx - 40, this.cy + this.roadHalfWidth + 55);
 
     // Direction Cardinal Labels on Pavement
     ctx.fillStyle = 'rgba(0, 242, 254, 0.45)';
